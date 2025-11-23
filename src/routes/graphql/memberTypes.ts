@@ -2,7 +2,7 @@ import { GraphQLObjectType, GraphQLList, GraphQLInt, GraphQLFloat } from 'graphq
 import { GqlContext } from './types/interfaces.js';
 import { MemberTypeId } from './types/membertypeid.js';
 
-const memberTypeType = new GraphQLObjectType({
+export const memberTypeType = new GraphQLObjectType({
   name: 'memberType',
   fields: () => ({
     id: { type: MemberTypeId },
@@ -11,14 +11,14 @@ const memberTypeType = new GraphQLObjectType({
   }),
 });
 
-const memberTypesQuery = {
+export const memberTypesQuery = {
   type: new GraphQLList(memberTypeType),
   resolve: async (_parent: unknown, _args: unknown, context: GqlContext) => {
     return context.prisma.memberType.findMany();
   },
 };
 
-const memberTypeQuery = {
+export const memberTypeQuery = {
   type: memberTypeType,
   args: { id: { type: MemberTypeId } },
   resolve: async (_parent: unknown, args: { id: string }, context: GqlContext) => {
@@ -33,5 +33,3 @@ const memberTypeQuery = {
     return mte;
   },
 };
-
-export { memberTypeType, memberTypesQuery, memberTypeQuery };

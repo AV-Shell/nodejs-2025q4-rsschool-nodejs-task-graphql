@@ -5,12 +5,15 @@ import {
   GraphQLFloat,
   GraphQLInputObjectType,
   GraphQLNonNull,
+  GraphQLResolveInfo,
 } from 'graphql';
+import { parseResolveInfo, ResolveTree } from 'graphql-parse-resolve-info';
 
 import { changeUserDto, createUserDto, GqlContext } from './types/interfaces.js';
 import { UUIDType } from './types/uuid.js';
 import { profileType } from './profiles.js';
 import { postType } from './posts.js';
+import { Prisma, User } from '@prisma/client';
 
 export const userType: GraphQLObjectType = new GraphQLObjectType({
   name: 'user',
@@ -21,54 +24,76 @@ export const userType: GraphQLObjectType = new GraphQLObjectType({
 
     posts: {
       type: new GraphQLList(postType),
-      resolve: (parent, args, context) =>
-        context.prisma.post.findMany({ where: { authorId: parent.id } }),
+      resolve: (parent: { id: string }, args, context: GqlContext) =>
+        context.postsLoader.load(parent.id),
     },
     profile: {
       type: profileType,
-      resolve: async (
-        parent: { id: string },
-        args: { id: string },
-        context: GqlContext,
-      ) => {
-        const profile = await context.prisma.profile.findUnique({
-          where: { userId: parent.id },
-        });
-
-        if (!profile) {
-          return null;
-        }
-
-        return profile;
-      },
+      resolve: (parent: { id: string }, args, context: GqlContext) =>
+        context.profileLoader.load(parent.id),
     },
     userSubscribedTo: {
       type: new GraphQLList(userType),
-      resolve: async (parent: { id: string }, args, context) => {
-        const authors = await context.prisma.subscribersOnAuthors.findMany({
-          where: { subscriberId: parent.id },
-          include: { author: true },
-        });
-        return authors.map((author) => author.author);
-      },
+      resolve: async (parent: { id: string }, args, context: GqlContext) =>
+        context.authorsLoader.load(parent.id),
     },
     subscribedToUser: {
       type: new GraphQLList(userType),
-      resolve: async (parent: { id: string }, args, context) => {
-        const subscribers = await context.prisma.subscribersOnAuthors.findMany({
-          where: { authorId: parent.id },
-          include: { subscriber: true },
-        });
-        return subscribers.map((subscriber) => subscriber.subscriber);
-      },
+      resolve: async (parent: { id: string }, args, context: GqlContext) =>
+        context.subscribersLoader.load(parent.id),
     },
   }),
 });
 
 export const usersQuery = {
   type: new GraphQLList(userType),
-  resolve: async (parent: unknown, args: unknown, context: GqlContext) => {
-    return context.prisma.user.findMany();
+
+  resolve: async (
+    _parent: unknown,
+    _args: unknown,
+    context: GqlContext,
+    info: GraphQLResolveInfo,
+  ): Promise<User[]> => {
+    const parsed = parseResolveInfo(info) as ResolveTree | null;
+    if (!parsed) {
+      return context.prisma.user.findMany();
+    }
+
+    const userFields = parsed.fieldsByTypeName?.user;
+
+    const include: Prisma.UserInclude = {};
+
+    if (userFields.userSubscribedTo) {
+      include.userSubscribedTo = true;
+    }
+
+    if (userFields.subscribedToUser) {
+      include.subscribedToUser = true;
+    }
+
+    if (!Object.keys(include).length) {
+      return context.prisma.user.findMany();
+    }
+
+    const myUsers = await context.prisma.user.findMany({ include });
+    const usersById = new Map(myUsers.map((u) => [u.id, u]));
+
+    myUsers.forEach((user) => {
+      if (Array.isArray(user.userSubscribedTo)) {
+        context.authorsLoader.prime(
+          user.id,
+          user.userSubscribedTo.map((data) => usersById.get(data.authorId)!),
+        );
+      }
+      if (Array.isArray(user.subscribedToUser)) {
+        context.subscribersLoader.prime(
+          user.id,
+          user.subscribedToUser.map((data) => usersById.get(data.subscriberId)!),
+        );
+      }
+    });
+
+    return myUsers;
   },
 };
 
@@ -77,7 +102,6 @@ export const userQuery = {
   args: { id: { type: UUIDType } },
 
   resolve: async (_parent: unknown, args: { id: string }, context: GqlContext) => {
-    console.log(`Get user by id: `, args.id);
     const user = await context.prisma.user.findUnique({
       where: { id: args.id },
     });
@@ -122,7 +146,6 @@ export const userCreate = {
     });
   },
 };
-
 
 export const userDelete = {
   type: GraphQLString,

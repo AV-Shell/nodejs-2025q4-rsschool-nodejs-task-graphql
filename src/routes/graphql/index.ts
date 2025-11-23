@@ -27,6 +27,14 @@ import {
   unsubscribeFrom,
 } from './users.js';
 import depthLimit from 'graphql-depth-limit';
+import {
+  createAuthorsLoader,
+  createMemberTypesLoader,
+  createPostsLoader,
+  createProfileLoader,
+  createSubscribersLoader,
+} from './loaders.js';
+import { GqlContext } from './types/interfaces.js';
 
 const DEPTH_LIMIT = 5;
 
@@ -99,11 +107,20 @@ const plugin: FastifyPluginAsyncTypebox = async (fastify) => {
         return { errors: depthErrors };
       }
 
+      const context: GqlContext = {
+        prisma,
+        memberTypeLoader: createMemberTypesLoader(prisma),
+        postsLoader: createPostsLoader(prisma),
+        profileLoader: createProfileLoader(prisma),
+        subscribersLoader: createSubscribersLoader(prisma),
+        authorsLoader: createAuthorsLoader(prisma),
+      };
+
       return graphql({
         schema,
         source: String(query),
         variableValues: variables,
-        contextValue: fastify,
+        contextValue: context,
       });
     },
   });
