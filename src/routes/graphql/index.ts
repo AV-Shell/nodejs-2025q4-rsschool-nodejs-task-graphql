@@ -1,6 +1,13 @@
 import { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox';
 import { createGqlResponseSchema, gqlResponseSchema } from './schemas.js';
-import { graphql, GraphQLObjectType, GraphQLSchema } from 'graphql';
+import {
+  parse,
+  validate,
+  graphql,
+  GraphQLObjectType,
+  GraphQLSchema,
+  DocumentNode,
+} from 'graphql';
 import { postQuery, postsQuery, postCreate, postDelete, postChange } from './posts.js';
 import { memberTypeQuery, memberTypesQuery } from './memberTypes.js';
 import {
@@ -19,6 +26,9 @@ import {
   subscribeTo,
   unsubscribeFrom,
 } from './users.js';
+import depthLimit from 'graphql-depth-limit';
+
+const DEPTH_LIMIT = 5;
 
 const schema = new GraphQLSchema({
   query: new GraphQLObjectType({
@@ -66,6 +76,28 @@ const plugin: FastifyPluginAsyncTypebox = async (fastify) => {
     },
     async handler(req) {
       const { query, variables } = req.body;
+
+      let document: DocumentNode;
+      try {
+        document = parse(query);
+      } catch (err) {
+        let errorMessage = '';
+        if (err instanceof Error) {
+          errorMessage = err?.message;
+        }
+        return {
+          errors: [
+            {
+              message: 'Query parsing error: ' + errorMessage,
+            },
+          ],
+        };
+      }
+      const depthErrors = validate(schema, document, [depthLimit(DEPTH_LIMIT)]);
+
+      if (depthErrors.length > 0) {
+        return { errors: depthErrors };
+      }
 
       return graphql({
         schema,
